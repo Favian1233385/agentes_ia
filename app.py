@@ -118,12 +118,14 @@ with tab_busqueda:
                     # PASO 4: AGENTE 4 - DESPACHADOR
                     # --------------------------------------------------
                     despachos = []
-                    with st.spinner("📲 Agente 4: Generando enlaces de WhatsApp..."):
+                    with st.spinner("📲 Agente 4: Generando enlaces de despachos multicanal..."):
                         for val, est in zip(validaciones, estrategias):
                             despacho = ejecutar_con_reintento(
                                 ejecutar_agente_4, 
                                 val.contacto_limpio, 
-                                est.mensaje_pitch_whatsapp
+                                est.mensaje_pitch_whatsapp,
+                                tipo_contacto=val.tipo_contacto,
+                                negocio=est.nombre_negocio
                             )
                             despachos.append(despacho)
                             time.sleep(2)
@@ -140,7 +142,7 @@ with tab_busqueda:
                             "diagnostico": est.diagnostico_clave,
                             "solucion": est.solucion_propuesta,
                             "pitch_whatsapp": est.mensaje_pitch_whatsapp,
-                            "url_wa": getattr(desp, 'url_directa_wa', '')
+                            "url_wa": getattr(desp, 'url_despacho', getattr(desp, 'url_directa_wa', ''))
                         })
 
                     try:
@@ -158,19 +160,18 @@ with tab_busqueda:
                             st.markdown(f"**Diagnóstico:** {item['diagnostico']}")
                             st.markdown(f"**Solución:** {item['solucion']}")
                             
-                            # 1. ETIQUETA DINÁMICA SEGÚN CANAL
+                            # ETIQUETA DINÁMICA SEGÚN CANAL
                             etiqueta_canal = "Mensaje para Correo Electrónico:" if item['tipo_contacto'] == "Email" else "Mensaje de WhatsApp:"
                             st.text_area(etiqueta_canal, value=item['pitch_whatsapp'], height=120)
-                            
-                            # 2. BOTONES DE ACCIÓN SEGÚN CANAL
-                            if item['tipo_contacto'] == "WhatsApp" and item.get('url_wa'):
-                                st.link_button("📲 Contactar por WhatsApp", item['url_wa'], type="primary")
-                                
-                            elif item['tipo_contacto'] == "Email":
-                                # Generar enlace directo de correo con asunto y cuerpo precargado
-                                asunto = f"Propuesta de mejora tecnológica para {item['negocio']}"
-                                url_mailto = f"mailto:{item['contacto']}?subject={asunto}&body={item['pitch_whatsapp']}"
-                                st.link_button("✉️ Enviar Correo Electrónico", url_mailto, type="primary")
+
+                            # BOTONES DE ACCIÓN DINÁMICOS
+                            if item.get('url_wa'):
+                                if item['tipo_contacto'] == "Email":
+                                    st.link_button("✉️ Enviar Correo Electrónico", item['url_wa'], type="primary")
+                                else:
+                                    st.link_button("📲 Contactar por WhatsApp", item['url_wa'], type="primary")
+                            else:
+                                st.warning(f"⚠️ No se pudo generar el enlace de despacho para el canal {item['tipo_contacto']}.")
 
             except Exception as e:
                 st.error(f"Ocurrió un error en la ejecución: {e}")
