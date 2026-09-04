@@ -1,35 +1,40 @@
 from pydantic import BaseModel, Field
 from langchain_google_genai import ChatGoogleGenerativeAI
 from config import config
-from agente_1_investigador import Lead, ejecutar_agente_1
+from agente_1_investigador import Lead
 
 # ==========================================
-# 1. ESQUEMA DE SALIDA DEL AGENTE 2
+# 1. ESQUEMA DE DATOS ESTRUCTURADOS (Pydantic)
 # ==========================================
 
 class PropuestaEstrategica(BaseModel):
     nombre_negocio: str = Field(description="Nombre del negocio evaluado")
     diagnostico_clave: str = Field(description="Resumen ejecutivo del problema detectado")
-    solucion_propuesta: str = Field(description="Descripción técnica/funcional de la solución (ej. Bot de WhatsApp, CRM, etc.)")
-    mensaje_pitch_whatsapp: str = Field(description="Mensaje directo y persuasivo listo para enviar por WhatsApp al dueño")
+    solucion_propuesta: str = Field(description="Descripción técnica/funcional de la solución")
+    mensaje_pitch_whatsapp: str = Field(description="Mensaje directo y persuasivo listo para enviar por WhatsApp")
 
 # ==========================================
-# 2. INICIALIZACIÓN DEL MODELO
+# 2. LÓGICA DEL AGENTE ESTRATEGA
 # ==========================================
 
-llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",
-    temperature=0.4,
-    google_api_key=config.GOOGLE_API_KEY
-)
+def ejecutar_agente_2(
+    lead: Lead, 
+    nombre_desarrollador: str = config.DESARROLLADOR_NOMBRE,
+    nombre_agencia: str = config.AGENCIA_NOMBRE
+) -> PropuestaEstrategica:
+    """
+    Agente 2: Genera un diagnóstico comercial, propuesta técnica y script de ventas
+    estructurado en Pydantic utilizando gemini-3.6-flash.
+    """
+    # Inicialización limpia sin temperature para evitar UserWarnings
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-2.5-flash",
+        google_api_key=config.obtener_siguiente_key()
+    )
 
-agente_estratega_llm = llm.with_structured_output(PropuestaEstrategica)
+    # Forzamos la salida estructurada de manera estricta
+    agente_estratega_llm = llm.with_structured_output(PropuestaEstrategica, method="json_schema")
 
-# ==========================================
-# 3. LÓGICA DEL AGENTE ESTRATEGA
-# ==========================================
-
-def ejecutar_agente_2(lead: Lead, nombre_desarrollador: str = config.DESARROLLADOR_NOMBRE,nombre_agencia: str = config.AGENCIA_NOMBRE) -> PropuestaEstrategica:
     prompt = f"""
     Actúa como un Consultor de Tecnología y Ventas B2B para negocios locales.
     Tu nombre/firma es: '{nombre_desarrollador}'.
@@ -40,33 +45,21 @@ def ejecutar_agente_2(lead: Lead, nombre_desarrollador: str = config.DESARROLLAD
     - Categoría: {lead.categoria}
     - Problema Detectado: {lead.problema_detectado}
     
-   Tu tarea:
+    Tu tarea:
     1. Elabora un diagnóstico breve del impacto negativo de su problema actual.
-    2. Diseña una propuesta de solución de software/automatización concreta (ej. asistente de WhatsApp con IA, catálogo interactivo, etc.).
-    3. Escribe un mensaje corto, profesional y empático listo para enviar al dueño del negocio. 
-       REGLA OBLIGATORIA: El mensaje DEBE comenzar EXACTAMENTE con el siguiente saludo:
-       "Hola, soy {nombre_desarrollador} de {nombre_agencia}." 
-       Seguido de la propuesta personalizada según el negocio. NO utilices corchetes, variables vacías ni etiquetas como '[Tu Nombre]' o '[Tu Empresa]'.
+    2. Diseña una propuesta de solución de software/automatización concreta.
+    3. Escribe un mensaje corto, profesional y empático listo para enviar al dueño del negocio.
+       REGLA OBLIGATORIA: El mensaje DEBE comenzar EXACTAMENTE con el saludo:
+       "Hola, soy {nombre_desarrollador} de {nombre_agencia}."
     """
     
-    resultado = agente_estratega_llm.invoke(prompt)
-    return resultado
-
-if __name__ == "__main__":
-    print("--- INICIANDO FLUJO DE PRUEBA: AGENTE 1 + AGENTE 2 ---\n")
-    
-    investigacion = ejecutar_agente_1("Hosterías y Turismo Ecológico", "Tena, Napo")
-    primer_lead = investigacion.leads[0]
-    
-    print(f"-> Analizando propuesta comercial para: {primer_lead.nombre_negocio}...")
-    propuesta = ejecutar_agente_2(primer_lead)
-    
-    print("\n==============================================")
-    print(f"PROPUESTA COMERCIAL - {propuesta.nombre_negocio}")
-    print("==============================================")
-    print(f"Diagnóstico: {propuesta.diagnostico_clave}\n")
-    print(f"Solución Recomendada: {propuesta.solucion_propuesta}\n")
-    print("Mensaje Pitch para WhatsApp:")
-    print("----------------------------------------------")
-    print(propuesta.mensaje_pitch_whatsapp)
-    print("----------------------------------------------")
+    try:
+        return agente_estratega_llm.invoke(prompt)
+    except Exception as e:
+        print(f"❌ Error en Agente 2: {e}")
+        return PropuestaEstrategica(
+            nombre_negocio=lead.nombre_negocio,
+            diagnostico_clave="No se pudo procesar el diagnóstico automatizado.",
+            solucion_propuesta="Automatización comercial personalizada mediante chatbot y CRM.",
+            mensaje_pitch_whatsapp=f"Hola, soy {nombre_desarrollador} de {nombre_agencia}. Me gustaría conversar sobre soluciones de automatización para {lead.nombre_negocio}."
+        )

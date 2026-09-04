@@ -24,7 +24,7 @@ tab_busqueda, tab_historial = st.tabs(["🔎 Nueva Investigación", "📊 Histor
 def ejecutar_con_reintento(funcion_agente, *args, retrazos=4, espera_base=30, **kwargs):
     """
     Ejecuta la función del agente y maneja el límite de cuota (429) 
-    reintentando con un tiempo de espera progresivo (retroceso exponencial).
+    reintentando con un tiempo de espera progresivo.
     """
     for intento in range(retrazos):
         try:
@@ -34,7 +34,6 @@ def ejecutar_con_reintento(funcion_agente, *args, retrazos=4, espera_base=30, **
             if callable(codigo):
                 codigo = codigo()
             
-            # Verificación de límite de API por código de estado o texto
             es_limite_api = (
                 codigo == 429 
                 or getattr(e, "status_code", None) == 429 
@@ -43,7 +42,6 @@ def ejecutar_con_reintento(funcion_agente, *args, retrazos=4, espera_base=30, **
             )
             
             if es_limite_api and intento < retrazos - 1:
-                # Incrementa el tiempo de espera en cada intento (30s, 60s, 90s...)
                 tiempo_espera = espera_base * (intento + 1)
                 st.warning(f"⚠️ Cuota de API alcanzada (429). Esperando {tiempo_espera}s para reiniciar canal (Intento {intento + 1}/{retrazos})...")
                 time.sleep(tiempo_espera)
@@ -84,7 +82,7 @@ with tab_busqueda:
                     st.error("No se encontraron leads para esa búsqueda.")
                 else:
                     st.success(f"✅ Agente 1 identificó {len(investigacion.leads)} leads!")
-                    time.sleep(5)  # Pausa de enfriamiento tras consumo intensivo de búsqueda
+                    time.sleep(3)
 
                     # --------------------------------------------------
                     # PASO 2: AGENTE 2 - ESTRATEGA
@@ -92,17 +90,17 @@ with tab_busqueda:
                     estrategias = []
                     with st.spinner("🎯 Agente 2: Diseñando propuestas comerciales..."):
                         for lead in investigacion.leads:
+                            time.sleep(2)  # Pausa ligera para estabilizar cuota de Gemini
                             est = ejecutar_con_reintento(ejecutar_agente_2, lead)
                             estrategias.append(est)
-                            time.sleep(4)  # Pausa entre cada lead para regular RPM
+                            time.sleep(2)
                     st.success("✅ Agente 2 completó el análisis.")
-                    time.sleep(3)
 
                     # --------------------------------------------------
-                    # PASO 3: AGENTE 3 - VALIDADOR
+                    # PASO 3: AGENTE 3 - VALIDADOR (E.164 + MX)
                     # --------------------------------------------------
                     validaciones = []
-                    with st.spinner("🛡️ Agente 3: Validando números y contactos..."):
+                    with st.spinner("🛡️ Agente 3: Validando técnicamente (DNS/MX y E.164)..."):
                         for lead in investigacion.leads:
                             valida = ejecutar_con_reintento(
                                 ejecutar_agente_3, 
@@ -110,9 +108,8 @@ with tab_busqueda:
                                 lead.problema_detectado
                             )
                             validaciones.append(valida)
-                            time.sleep(3)
+                            time.sleep(1)
                     st.success("✅ Agente 3 validó la información.")
-                    time.sleep(2)
 
                     # --------------------------------------------------
                     # PASO 4: AGENTE 4 - DESPACHADOR
@@ -120,31 +117,42 @@ with tab_busqueda:
                     despachos = []
                     with st.spinner("📲 Agente 4: Generando enlaces de despachos multicanal..."):
                         for val, est in zip(validaciones, estrategias):
-                            despacho = ejecutar_con_reintento(
-                                ejecutar_agente_4, 
-                                val.contacto_limpio, 
-                                est.mensaje_pitch_whatsapp,
-                                tipo_contacto=val.tipo_contacto,
-                                negocio=est.nombre_negocio
-                            )
-                            despachos.append(despacho)
-                            time.sleep(2)
-                    st.success("✅ Agente 4 generó los enlaces.")
+                            # Solo generamos despacho si superó la prueba técnica
+                            if val.es_contacto_valido:
+                                despacho = ejecutar_con_reintento(
+                                    ejecutar_agente_4, 
+                                    val.contacto_limpio, 
+                                    est.mensaje_pitch_whatsapp,
+                                    tipo_contacto=val.tipo_contacto,
+                                    negocio=est.nombre_negocio
+                                )
+                                despachos.append(despacho)
+                            else:
+                                despachos.append(None)
+                            time.sleep(1)
+                    st.success("✅ Agente 4 generó los enlaces dinámicos.")
 
                     # CONSOLIDACIÓN Y PERSISTENCIA
                     resultados_completos = []
                     for est, val, desp in zip(estrategias, validaciones, despachos):
+                        url_final = ""
+                        if desp:
+                            url_final = getattr(desp, 'url_despacho', getattr(desp, 'url_directa_wa', ''))
+
                         resultados_completos.append({
                             "negocio": est.nombre_negocio,
                             "contacto": val.contacto_limpio,
                             "tipo_contacto": val.tipo_contacto,
                             "prioridad": val.prioridad,
+                            "es_valido": val.es_contacto_valido,
+                            "motivo_rechazo": val.motivo_rechazo,
                             "diagnostico": est.diagnostico_clave,
                             "solucion": est.solucion_propuesta,
                             "pitch_whatsapp": est.mensaje_pitch_whatsapp,
-                            "url_wa": getattr(desp, 'url_despacho', getattr(desp, 'url_directa_wa', ''))
+                            "url_wa": url_final
                         })
 
+                    # Guardar en base de datos solo los que sean válidos o tengan estructura lógica
                     try:
                         guardar_prospectos(resultados_completos)
                         st.toast("Resultados almacenados en MySQL", icon="💾")
@@ -156,7 +164,14 @@ with tab_busqueda:
                     for item in resultados_completos:
                         color_prio = "🔴" if item['prioridad'] == "Alta" else ("🟡" if item['prioridad'] == "Media" else "🟢")
                         
-                        with st.expander(f"📍 {item['negocio']} | Contacto: {item['contacto']} ({item['tipo_contacto']}) | Prioridad: {color_prio} {item['prioridad']}"):
+                        # Indicador visual en caso de que un correo/número haya fallado la validación técnica
+                        estado_val = "" if item['es_valido'] else "❌ [INVÁLIDO] "
+                        
+                        with st.expander(f"{estado_val}📍 {item['negocio']} | Contacto: {item['contacto']} ({item['tipo_contacto']}) | Prioridad: {color_prio} {item['prioridad']}"):
+                            
+                            if not item['es_valido']:
+                                st.error(f"🚫 Contacto descartado: {item['motivo_rechazo']}")
+                            
                             st.markdown(f"**Diagnóstico:** {item['diagnostico']}")
                             st.markdown(f"**Solución:** {item['solucion']}")
                             
@@ -165,11 +180,13 @@ with tab_busqueda:
                             st.text_area(etiqueta_canal, value=item['pitch_whatsapp'], height=120)
 
                             # BOTONES DE ACCIÓN DINÁMICOS
-                            if item.get('url_wa'):
+                            if item['es_valido'] and item.get('url_wa'):
                                 if item['tipo_contacto'] == "Email":
                                     st.link_button("✉️ Enviar Correo Electrónico", item['url_wa'], type="primary")
                                 else:
                                     st.link_button("📲 Contactar por WhatsApp", item['url_wa'], type="primary")
+                            elif not item['es_valido']:
+                                st.caption("No se puede generar botón de envío para un contacto que no superó la verificación MX / E.164.")
                             else:
                                 st.warning(f"⚠️ No se pudo generar el enlace de despacho para el canal {item['tipo_contacto']}.")
 
